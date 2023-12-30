@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+
+    <application>
+        <meta-data
+            android:name="org.godotengine.plugin.v1.Helper"
+            android:value="com.runn.flappytoonshelper.Helper"/>
+
+        <service
+            android:name=".NotificationService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- My data -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-4937004660611412~3233199749" />
+            
+    	<meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+
+        <!-- Facebook services -->
+        <meta-data
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="fb352763776016419" />
+        <meta-data
+            android:name="com.facebook.sdk.ClientToken"
+            android:value="cd9c9ec68c37e5cc770dd170fa713454"/>
+
+    </application>
+</manifest>

@@ -1,0 +1,22 @@
+[config]
+
+name="Helper"
+binary_type="local"
+binary="Helper.release.aar"
+
+[dependencies]
+
+remote=[
+    "com.facebook.android:facebook-login:16.2.0",
+    "com.google.android.gms:play-services-auth:20.7.0",
+    "com.google.firebase:firebase-auth:22.3.0",
+    "com.google.firebase:firebase-database:20.3.0",
+    "com.google.firebase:firebase-firestore:24.9.1",
+    "com.google.firebase:firebase-crashlytics:18.6.0",
+    "com.google.firebase:firebase-analytics:21.5.0",
+    "com.google.firebase:firebase-messaging:23.3.1",
+    "com.google.firebase:firebase-inappmessaging-display:20.4.0",
+    "com.google.android.gms:play-services-ads:22.5.0",
+    "com.google.android.ump:user-messaging-platform:2.1.0",
+    "androidx.appcompat:appcompat:1.6.1"
+]

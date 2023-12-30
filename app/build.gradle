@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.library'
+    id 'com.google.gms.google-services'
+    id 'com.google.firebase.crashlytics'
+}
+
+android {
+    namespace 'com.runn.flappytoonshelper'
+    compileSdk 34
+    buildToolsVersion = "34.0.0"
+
+    defaultConfig {
+        minSdk 24
+
+        testInstrumentationRunner "androidx.test.flappytoonshelper.AndroidJUnitRunner"
+    }
+
+    aaptOptions {
+        ignoreAssetsPattern = "!.svn:!.git:!.gitignore:!.ds_store:!*.scc:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_9
+        targetCompatibility JavaVersion.VERSION_1_9
+    }
+}
+
+dependencies {
+    // Auth Button implementation
+    implementation 'com.facebook.android:facebook-login:16.2.0'
+    implementation 'com.google.android.gms:play-services-auth:20.7.0'
+
+    // Firebase
+    implementation 'com.google.firebase:firebase-auth:22.3.0'
+    implementation 'com.google.firebase:firebase-database:20.3.0'
+    implementation 'com.google.firebase:firebase-firestore:24.9.1'
+    implementation 'com.google.firebase:firebase-crashlytics:18.6.0'
+    implementation 'com.google.firebase:firebase-analytics:21.5.0'
+    implementation 'com.google.firebase:firebase-messaging:23.3.1'
+    implementation 'com.google.firebase:firebase-inappmessaging-display:20.4.0'
+
+    //Admob - ads
+    implementation 'com.google.android.gms:play-services-ads:22.5.0'
+    implementation 'com.google.android.ump:user-messaging-platform:2.1.0'
+
+    //To create this library
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    compileOnly files('libs/godot-lib.template_release.aar')
+}
