@@ -2,7 +2,7 @@
 
 name="Helper"
 binary_type="local"
-binary="Helper.release.aar"
+binary="app-release.aar"
 
 [dependencies]
 

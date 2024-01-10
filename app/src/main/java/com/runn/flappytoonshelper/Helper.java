@@ -1,6 +1,7 @@
 package com.runn.flappytoonshelper;
 
 import static androidx.core.app.ActivityCompat.startIntentSenderForResult;
+import static androidx.core.content.ContextCompat.startActivity;
 import static com.google.android.gms.ads.RequestConfiguration.TAG_FOR_CHILD_DIRECTED_TREATMENT_TRUE;
 
 import android.annotation.SuppressLint;
@@ -54,7 +55,10 @@ import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.Query;
-import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
+import com.google.firebase.firestore.QuerySnapshot;
+import com.runn.flappytoonshelper.Ads.Banner;
+import com.runn.flappytoonshelper.Ads.BannerListener;
 import com.runn.flappytoonshelper.Ads.Consent;
 import com.runn.flappytoonshelper.Ads.ConsentListener;
 import com.runn.flappytoonshelper.Ads.RewardedInterstitial;
@@ -87,21 +91,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @SuppressWarnings("unused")
 public class Helper extends GodotPlugin {
     // For FB
     private static CallbackManager callbackManager;
-    // Using this for creating random user name
-    final String lexicon = "ABCDEFGHIJKLMNOPQRSTUVWXYZ12345674890";
-    final java.util.Random rand = new java.util.Random();
-    final Set<String> identifiers = new HashSet<String>();
     private final String TAG = "Helper";
     private final Activity activity;
     private final int REQ_ONE_TAP = 55;
-    public String token = "";
+    public static String token = "";
     // For Admob
     private boolean isReal = false;
     private boolean isForChildDirectedTreatment = false;
@@ -111,6 +111,7 @@ public class Helper extends GodotPlugin {
     private FrameLayout layout = null; // Store the layout
     private RewardedVideo rewardedVideo = null;
     private RewardedInterstitial rewardedInterstitial = null;
+    private Banner banner = null;
     private Consent consent;
     // For Google
     private SignInClient onTapClient;
@@ -127,26 +128,9 @@ public class Helper extends GodotPlugin {
         this.activity = getActivity();
     }
 
-    // Getting the country using ip-api for future purpose
-    public static JSONObject getJSONObjectFromURL() throws IOException, JSONException {
-        HttpURLConnection urlConnection = null;
-        URL url = new URL("http://ip-api.com/json");
-        urlConnection = (HttpURLConnection) url.openConnection();
-        urlConnection.setRequestMethod("GET");
-        urlConnection.setReadTimeout(10000 /* milliseconds */ );
-        urlConnection.setConnectTimeout(15000 /* milliseconds */ );
-        urlConnection.setDoOutput(true);
-        urlConnection.connect();
-        BufferedReader br = new BufferedReader(new InputStreamReader(url.openStream()));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) {
-            sb.append(line + "\n");
-        }
-        br.close();
-        String jsonString = sb.toString();
-        System.out.println("JSON: " + jsonString);
-        return new JSONObject(jsonString);
+    @Override
+    public void onMainPause() {
+        super.onMainPause();
     }
 
     @Nullable
@@ -163,11 +147,6 @@ public class Helper extends GodotPlugin {
             firebaseCrashlytics.deleteUnsentReports();
         }
         return layout;
-    }
-
-    @Override
-    public void onMainPause() {
-        super.onMainPause();
     }
 
     @Override
@@ -200,19 +179,24 @@ public class Helper extends GodotPlugin {
                 "getFromRTDB",
                 "boardData",
                 "loginWithFB",
+                "share",
                 "resetConsentInformation",
                 "requestConsentInfoUpdate",
                 "showRewardedInterstitial",
                 "loadRewardedInterstitial",
                 "showRewardedVideo",
                 "loadRewardedVideo",
-                "sendCrashes",
                 "sendEvent",
+                "loadBanner",
+                "showBanner",
+                "move",
+                "resize",
+                "hideBanner",
+                "getBannerWidth",
+                "getBannerHeight",
                 "isLoggedIn"
         );
     }
-
-//    TODO: manage the consent and check at every app opening
 
     @NonNull
     @Override
@@ -231,6 +215,11 @@ public class Helper extends GodotPlugin {
         signalInfo.add(new SignalInfo("on_rewarded", String.class, Integer.class));
         signalInfo.add(new SignalInfo("on_rewarded_clicked"));
         signalInfo.add(new SignalInfo("on_rewarded_impression"));
+
+        // Banner ad
+        signalInfo.add(new SignalInfo("on_admob_ad_loaded"));
+        signalInfo.add(new SignalInfo("on_admob_banner_failed_to_load", Integer.class));
+
         // Consent info
         signalInfo.add(new SignalInfo("on_consent_info_update_success"));
         signalInfo.add(
@@ -239,11 +228,13 @@ public class Helper extends GodotPlugin {
         signalInfo.add(new SignalInfo("on_app_can_request_ads", Integer.class));
 
         // Firebase
-        signalInfo.add(new SignalInfo("on_server_update", String.class));
+        signalInfo.add(new SignalInfo("on_server_update", String.class, Boolean.class)); // boolean is_error occurs
         signalInfo.add(new SignalInfo("on_completed"));
+        signalInfo.add(new SignalInfo("on_get_rtdb", Dictionary.class));
 
         // Leaderboard
         signalInfo.add(new SignalInfo("on_boardData", Dictionary.class));
+        signalInfo.add(new SignalInfo("on_getScore", Integer.class));
         return signalInfo;
     }
 
@@ -280,35 +271,26 @@ public class Helper extends GodotPlugin {
                         .build();
                 // Configuring if not login or first time opened app
                 if (isFirstTime || !isLoggedIn()) {
-                    // Current user's token
-                    FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
-                        if (!task.isSuccessful()) {
-                            Log.d(TAG, "FCM getting token failed");
-                            sendEvent("Firebase messaging", "Getting the token for current user failed");
-                        } else {
-                            token = task.getResult();
-                        }
-                    });
                     // Fb login Manager
                     FacebookSdk.setApplicationId("352763776016419");
                     LoginManager.getInstance().registerCallback(callbackManager, new FacebookCallback<LoginResult>() {
                         @Override
                         public void onSuccess(LoginResult loginResult) {
                             handleFacebookAccessToken(loginResult.getAccessToken());
-                            emitSignal("on_server_update", "Authenticated from Facebook...");
+                            emitSignal("on_server_update", "Authenticated from Facebook...", false);
                         }
 
                         @Override
                         public void onCancel() {
                             sendEvent("FB", "Fb login cancelled by the user");
-                            emitSignal("on_server_update", "Cancelled Facebook Auth");
+                            emitSignal("on_server_update", "Cancelled Facebook Auth", true);
                         }
 
                         @Override
                         public void onError(@NonNull FacebookException e) {
                             sendEvent("FB", String.valueOf(e));
                             sendCrashes("Fb login", String.valueOf(e), "Fb error");
-                            emitSignal("on_server_update", "Facebook error");
+                            emitSignal("on_server_update", "Facebook error", true);
                         }
                     });
                     Log.d(TAG, "Init completed");
@@ -326,11 +308,12 @@ public class Helper extends GodotPlugin {
         firebaseAuth.signInWithCredential(credential)
                 .addOnCompleteListener(activity, task -> {
                     if (!task.isSuccessful()) {
-                        emitSignal("on_server_update", "Server Error please try again...");
+                        emitSignal("on_server_update", "Server Error please try again...", true);
                     } else {
+                        firebaseUser = firebaseAuth.getCurrentUser();
                         cfgServerDB(firebaseUser.getDisplayName(),
                                 firebaseUser.getPhotoUrl().getPath(),
-                                getToken());
+                                token);
                     }
                 });
     }
@@ -340,27 +323,29 @@ public class Helper extends GodotPlugin {
         firebaseAuth.signInWithCredential(credential)
                 .addOnCompleteListener((Executor) this, task -> {
                     if (!task.isSuccessful()) {
-                        emitSignal("on_server_update", "Server Error please try again...");
+                        emitSignal("on_server_update", "Server Error please try again...", true);
                     } else {
+                        firebaseUser = firebaseAuth.getCurrentUser();
                         cfgServerDB(firebaseUser.getDisplayName(),
                                 firebaseUser.getPhotoUrl().getPath(),
-                                getToken());
+                                token);
                     }
                 });
     }
 
     @UsedByGodot
     public void loginWithAnonym(){
-        emitSignal("on_server_update", "Flying toward server");
+        emitSignal("on_server_update", "Flying toward server", false);
         firebaseAuth.signInAnonymously().addOnCompleteListener(new OnCompleteListener<AuthResult>() {
             @Override
             public void onComplete(@NonNull Task<AuthResult> task) {
                 if (!task.isSuccessful()){
-                    emitSignal("on_server_update", "Server Error please try again...");
+                    emitSignal("on_server_update", "Server Error please try again...", true);
                 }else{
+                    firebaseUser = firebaseAuth.getCurrentUser();
                     cfgServerDB(randomIdentifier(),
                             "https://firebasestorage.googleapis.com/v0/b/flappy-toons.appspot.com/o/icon.png?alt=media&token=76a10d02-db85-41e6-9f06-76ea28b304a0",
-                            getToken());
+                            token);
                 }
             }
         });
@@ -384,7 +369,7 @@ public class Helper extends GodotPlugin {
                                     null);
                         }catch (IntentSender.SendIntentException e){
                             sendEvent("One Tap Google", e.toString());
-                            emitSignal("on_server_update", "Google login failed");
+                            emitSignal("on_server_update", "Google login failed", true);
                         }
                     }
                 })
@@ -392,40 +377,33 @@ public class Helper extends GodotPlugin {
                     @Override
                     public void onFailure(@NonNull Exception e) {
                         sendEvent("One Tap Google", e.toString());
-                        emitSignal("on_server_update", "Google login error");
+                        emitSignal("on_server_update", "Google login error", true);
                     }
                 });
     }
 
     private void cfgServerDB(String name, String photoURL, String msgToken){
         // For leaderboard
-        Player player = new Player();
-        player.setName(name);
-        player.setPhoto(photoURL);
-        player.setScore(0);
-        try {
-            player.setCountry(getCountryCode());
-        }catch (IOException exception){
-            sendEvent("IP-API", exception.toString());
-        }catch (JSONException jsonException){
-            sendEvent("JSON Parser", jsonException.toString());
-        }
+        Map<String, Object> player = new HashMap<>();
+        player.put("name", name);
+        player.put("photo", photoURL);
+        player.put("score", 0);
         firestore.collection("players")
                 .document(firebaseUser.getUid())
                 .set(player);
 
         // For identity and msg token
         Map<String, String> map = new HashMap<>();
-        map.put(player.getName(), getToken());
+        map.put(name, token);
         firestore.collection("msgToken")
                 .document(firebaseUser.getUid())
                 .set(map);
         emitSignal("on_completed");
     }
 
+
     @UsedByGodot
-    public int getScore(){
-        AtomicInteger i = new AtomicInteger();
+    public void getScore(){
         firestore.collection("players")
                 .document(firebaseUser.getUid())
                 .get()
@@ -433,11 +411,11 @@ public class Helper extends GodotPlugin {
                     if (task.isSuccessful()) {
                         DocumentSnapshot snapshot = task.getResult();
                         if (snapshot != null && snapshot.exists()) {
-                            i.set((int) snapshot.get("score"));
+                            int score = Objects.requireNonNull(snapshot.getLong("score")).intValue();
+                            emitSignal("on_getScore", score);
                         }
                     }
                 });
-        return i.get();
     }
 
     @UsedByGodot
@@ -450,41 +428,18 @@ public class Helper extends GodotPlugin {
     @UsedByGodot
     public void logout(){
         firebaseAuth.signOut();
-        emitSignal("on_server_update", "Logged out");
+        emitSignal("on_server_update", "Logged out", false);
     }
 
+    @NonNull
     private String randomIdentifier() {
         StringBuilder builder = new StringBuilder();
         builder.append("FT-");
-        while(builder.toString().length() == 0) {
-            int length = rand.nextInt(3)+3;
-            for(int i = 0; i < length; i++) {
-                builder.append(lexicon.charAt(rand.nextInt(lexicon.length())));
-            }
-            if(identifiers.contains(builder.toString())) {
-                builder = new StringBuilder();
-            }
-        }
+        int desiredLength = 6;
+        builder.append(UUID.randomUUID()
+                .toString()
+                .substring(0, desiredLength));
         return builder.toString();
-    }
-
-    /**
-     * Saving the data to RTDB
-     * Use it to store unlocked things
-     * Backup and user management
-     */
-    @UsedByGodot
-    public void saveToRTDB(String key, String[] values){
-        if (firebaseAuth != null) {
-            firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).setValue(Collections.singletonList(values));
-        }
-    }
-
-    @UsedByGodot
-    public void savePlayers(String[] unlocked){
-        if (firebaseAuth != null) {
-            firebaseDatabase.getReference().child(firebaseUser.getUid()).child("unlocked").setValue(Collections.singletonList(unlocked));
-        }
     }
 
     /**
@@ -493,14 +448,14 @@ public class Helper extends GodotPlugin {
      * Use this to secure user data
      * **/
     @UsedByGodot
-    public String[] getFromRTDB(String key){
-        List<String> mylist = new ArrayList<String>();
+    public void getFromRTDB(String key){
+        Dictionary db = new Dictionary();
         firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 for (DataSnapshot snap:
                         snapshot.getChildren()) {
-                    mylist.add(snap.getValue(String.class));
+                    db.put(snap.getKey(), snap.getValue(String.class));
                 }
             }
 
@@ -510,7 +465,19 @@ public class Helper extends GodotPlugin {
                 sendEvent("Error getting " + key, error.toString());
             }
         });
-        return mylist.toArray(new String[0]);
+        emitSignal("on_get_rtdb", db);
+    }
+
+    /**
+     * Saving the data to RTDB
+     * Use it to store unlocked things
+     * Backup and user management
+     */
+    @UsedByGodot
+    public void saveToRTDB(String key, Dictionary db){
+        if (firebaseAuth != null) {
+            firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).setValue(db);
+        }
     }
 
     /**
@@ -521,36 +488,47 @@ public class Helper extends GodotPlugin {
     @UsedByGodot
     public void boardData(){
         Dictionary toReturn = new Dictionary();
-        firestore.collection("players")
+        Query query = firestore.collection("players")
                 .orderBy("score", Query.Direction.DESCENDING)
-                .limit(10)
-                .addSnapshotListener((value, error) -> {
-                    firebaseCrashlytics.recordException(error);
-                    if (error != null){
-                        sendCrashes("loading Players error", String.valueOf(error), "Firestore error");
-                        emitSignal("on_server_update", "Server Error please try again...");
-                        return;
-                    }
-                    List<Player> players = value.toObjects(Player.class);
-                    int indx = 0;
-                    for (Player p: players) {
-                        toReturn.put("name"+indx,p.getName());
-                        toReturn.put("country"+indx, p.getCountry());
-                        toReturn.put("score"+indx, p.getScore());
-                        toReturn.put("photo"+indx, p.getPhoto());
-                        Log.d(TAG, p.getName());
-                        Log.d(TAG, toReturn.toString());
-                        indx++;
-                    }
-                });
+                .limit(10);
+        query.get().addOnCompleteListener(new OnCompleteListener<QuerySnapshot>() {
+    @Override
+    public void onComplete(@NonNull Task<QuerySnapshot> task) {
+        if (task.isSuccessful()) {
+            // Loop through the documents in the snapshot
+            int i = 0;
+            for (QueryDocumentSnapshot document : task.getResult()) {
+                // Get the fields of the document
+                String name = document.getString("name");
+                String photo = document.getString("photo");
+                int score = Objects.requireNonNull(document.getLong("score")).intValue();
+                Dictionary pl = new Dictionary();
+                pl.put("name",name);
+                pl.put("score", score);
+                pl.put("photo", photo);
+                toReturn.put(String.valueOf(i++), pl);
+            }
         emitSignal("on_boardData", toReturn);
-        Log.d(TAG, toReturn.get_keys().toString());
-        Log.d(TAG, toReturn.get_values().toString());
+        } else {
+            // Handle the error
+            firebaseCrashlytics.recordException(Objects.requireNonNull(task.getException()));
+            sendCrashes("loading Players error", String.valueOf(task.getException()), "Firestore error");
+            emitSignal("on_server_update", "Server Error please try again...", true);
+        }
     }
+});
+}
 
-    private String getCountryCode() throws JSONException, IOException {
-        JSONObject jsonObject = getJSONObjectFromURL();
-        return (String) jsonObject.get("country");
+    @UsedByGodot
+    public void share(int score){
+        Intent sendIntent = new Intent();
+        sendIntent.setAction(Intent.ACTION_SEND);
+        String shareBody = "Check out this game: Flappy Toons" + ". My score is: " + score + ". You can download it from: https://play.google.com/store/apps/details?id=com.runn.flappytoons";
+        sendIntent.putExtra(Intent.EXTRA_TEXT, shareBody);
+        sendIntent.setType("text/plain");
+
+        Intent shareIntent = Intent.createChooser(sendIntent, null);
+        startActivity(this.activity.getApplicationContext(), shareIntent, null);
     }
 
     @UsedByGodot
@@ -578,7 +556,6 @@ public class Helper extends GodotPlugin {
         analytics.logEvent("Event_Send", bundle);
     }
 
-    @UsedByGodot
     public void sendCrashes(String key, String value, String msg) {
         firebaseCrashlytics = FirebaseCrashlytics.getInstance();
         firebaseCrashlytics.setCustomKey(key, value);
@@ -603,7 +580,7 @@ public class Helper extends GodotPlugin {
                 handleGoogleAccessToken(idToken);
             } catch (ApiException e){
                 sendEvent("One Tap Google", e.toString());
-                emitSignal("on_server_update", "Google login failed");
+                emitSignal("on_server_update", "Google login failed", true);
             }
         }
         callbackManager.onActivityResult(requestCode, resultCode, data);
@@ -790,7 +767,7 @@ public class Helper extends GodotPlugin {
 
                 @Override
                 public void onRewardedInterstitialFailedToShow(int errorCode) {
-                    emitSignal("on_rewarded_interstitial_ad_failed_to_show", errorCode);
+                    Log.d(TAG, String.valueOf(errorCode));
                 }
 
                 @Override
@@ -864,8 +841,108 @@ public class Helper extends GodotPlugin {
         }
     }
 
+    /* Banner
+     * ********************************************************************** */
+
+    /**
+     * Load a banner
+     *
+     * @param id      AdMod Banner ID
+     * @param isOnTop To made the banner top or bottom
+     */
+    @UsedByGodot
+    public void loadBanner(final String id, final boolean isOnTop, final String bannerSize) {
+        activity.runOnUiThread(() -> {
+            if (banner != null) banner.remove();
+            banner = new Banner(id, getAdRequest(), activity, new BannerListener() {
+                @Override
+                public void onBannerLoaded() {
+                    emitSignal("on_admob_ad_loaded");
+                }
+
+                @Override
+                public void onBannerFailedToLoad(int errorCode) {
+                    emitSignal("on_admob_banner_failed_to_load", errorCode);
+                }
+            }, isOnTop, layout, bannerSize);
+        });
+    }
+
+    /**
+     * Show the banner
+     */
+    @UsedByGodot
+    public void showBanner() {
+        activity.runOnUiThread(() -> {
+            if (banner != null) {
+                banner.show();
+            }
+        });
+    }
+
+    /**
+     * Resize the banner
+     * @param isOnTop To made the banner top or bottom
+     */
+    @UsedByGodot
+    public void move(final boolean isOnTop) {
+        activity.runOnUiThread(() -> {
+            if (banner != null) {
+                banner.move(isOnTop);
+            }
+        });
+    }
+
+    /**
+     * Resize the banner
+     */
+    @UsedByGodot
+    public void resize() {
+        activity.runOnUiThread(() -> {
+            if (banner != null) {
+                banner.resize();
+            }
+        });
+    }
 
 
+    /**
+     * Hide the banner
+     */
+    @UsedByGodot
+    public void hideBanner() {
+        activity.runOnUiThread(() -> {
+            if (banner != null) {
+                banner.hide();
+            }
+        });
+    }
+
+    /**
+     * Get the banner width
+     *
+     * @return int Banner width
+     */
+    @UsedByGodot
+    public int getBannerWidth() {
+        if (banner != null) {
+            return banner.getWidth();
+        }
+        return 0;
+    }
+
+    /**
+     * Get the banner height
+     *
+     * @return int Banner height
+     */
+    @UsedByGodot
+    public int getBannerHeight() {
+        if (banner != null) {
+            return banner.getHeight();
+        }
+        return 0;
+    }
 
     /**
      * Generate MD5 for the deviceID
@@ -899,17 +976,10 @@ public class Helper extends GodotPlugin {
      *
      * @return String Device ID
      */
+    @NonNull
     private String getAdMobDeviceId() {
         @SuppressLint("HardwareIds") String android_id = Settings.Secure.getString(activity.getContentResolver(), Settings.Secure.ANDROID_ID);
-        String deviceId = md5(android_id).toUpperCase(Locale.US);
+        String deviceId = md5(android_id).toUpperCase(Locale.ENGLISH);
         return deviceId;
-    }
-
-    /**
-     * Get the FCM token
-     * @return token stored by init else generate new token
-     * */
-    private String getToken() {
-        return (!Objects.equals(token, "")) ? token: FirebaseMessaging.getInstance().getToken().getResult();
     }
 }

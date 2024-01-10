@@ -6,6 +6,7 @@ import androidx.annotation.NonNull;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
+import com.google.rpc.Help;
 
 import java.util.Objects;
 
@@ -15,6 +16,7 @@ public class NotificationService extends FirebaseMessagingService {
     @Override
     public void onNewToken(@NonNull String token) {
         Log.d(TAG, "Refreshed token: " + token);
+        Helper.token = token;
         super.onNewToken(token);
     }
 

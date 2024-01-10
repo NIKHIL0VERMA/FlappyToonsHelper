@@ -25,11 +25,21 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_9
         targetCompatibility JavaVersion.VERSION_1_9
     }
 }
+
+tasks.register('copyAAR', Copy) {
+    from '/media/MainStorage/Android_Projects/FlappyToonsHelper/app/build/outputs/aar'
+    include 'app-release.aar'
+    into '/media/MainStorage/Android_Projects/Flappy_Toons-Bird_Game/android/plugins'
+    into '/media/MainStorage/Android_Projects/FlappyToonsHelper/ToGodot'
+}
+
+assemble.finalizedBy(copyAAR)
 
 dependencies {
     // Auth Button implementation
