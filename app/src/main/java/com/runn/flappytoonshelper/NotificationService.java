@@ -6,9 +6,16 @@ import androidx.annotation.NonNull;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
-import com.google.rpc.Help;
-
 import java.util.Objects;
+
+/**
+ * Created by Nikhil Verma.
+ * RUNN is owner of the com.runn.flappytoons under Project Flappy Toons.
+ * Copyright (c) 2020 RUNN.
+ * Don't use the project or it's code without any legal permission.
+ * For getting permission to use any part of code.
+ * You may contact on nikhil2003verma@gmail.com
+ **/
 
 public class NotificationService extends FirebaseMessagingService {
 
@@ -23,13 +30,10 @@ public class NotificationService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
-
-        //getting the title and the body
         String title = Objects.requireNonNull(remoteMessage.getNotification()).getTitle();
         String body = remoteMessage.getNotification().getBody();
 
         Log.d(TAG, "Got msg with Title: " + title + "\nBody: " + body);
-        //then here we can use the title and body to build a notification
         CustomNotificationManager.getInstance(this).displayNotification(title, body);
 
     }

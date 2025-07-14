@@ -7,7 +7,7 @@
 
     <application>
         <meta-data
-            android:name="org.godotengine.plugin.v1.Helper"
+            android:name="org.godotengine.plugin.v2.Helper"
             android:value="com.runn.flappytoonshelper.Helper"/>
 
         <service
@@ -21,14 +21,5 @@
     	<meta-data
             android:name="firebase_messaging_auto_init_enabled"
             android:value="false" />
-
-        <!-- Facebook services -->
-        <meta-data
-            android:name="com.facebook.sdk.ApplicationId"
-            android:value="fb352763776016419" />
-        <meta-data
-            android:name="com.facebook.sdk.ClientToken"
-            android:value="cd9c9ec68c37e5cc770dd170fa713454"/>
-
     </application>
 </manifest>

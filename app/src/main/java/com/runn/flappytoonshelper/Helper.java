@@ -1,33 +1,27 @@
 package com.runn.flappytoonshelper;
 
-import static androidx.core.app.ActivityCompat.startIntentSenderForResult;
+import static android.app.Activity.RESULT_OK;
 import static androidx.core.content.ContextCompat.startActivity;
 
-import android.app.Activity;
 import android.content.Intent;
-import android.content.IntentSender;
 import android.os.Bundle;
 import android.util.Log;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.collection.ArraySet;
 
-import com.facebook.AccessToken;
-import com.facebook.CallbackManager;
-import com.facebook.FacebookCallback;
-import com.facebook.FacebookException;
-import com.facebook.FacebookSdk;
-import com.facebook.FacebookSdkNotInitializedException;
-import com.facebook.login.LoginManager;
-import com.facebook.login.LoginResult;
-import com.google.android.gms.auth.api.identity.BeginSignInRequest;
-import com.google.android.gms.auth.api.identity.Identity;
-import com.google.android.gms.auth.api.identity.SignInClient;
-import com.google.android.gms.auth.api.identity.SignInCredential;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
 import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
 import com.google.firebase.analytics.FirebaseAnalytics;
 import com.google.firebase.auth.AuthCredential;
-import com.google.firebase.auth.FacebookAuthProvider;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
@@ -48,26 +42,48 @@ import org.godotengine.godot.plugin.GodotPlugin;
 import org.godotengine.godot.plugin.SignalInfo;
 import org.godotengine.godot.plugin.UsedByGodot;
 
-import java.util.ArrayList;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
-@SuppressWarnings("unused")
+/**
+ * Created by Nikhil Verma.
+ * RUNN is owner of the com.runn.flappytoons under Project Flappy Toons.
+ * Copyright (c) 2020 RUNN.
+ * Don't use the project or it's code without any legal permission.
+ * For getting permission to use any part of code.
+ * You may contact on nikhil2003verma@gmail.com
+ **/
+
 public class Helper extends GodotPlugin {
-    // For FB
-    private static CallbackManager callbackManager;
     private final String TAG = "Helper";
-    private final Activity activity;
-    private final int REQ_ONE_TAP = 55;
+    private final Godot godot;
     public static String token = "";
-    // For Google
-    private SignInClient onTapClient;
-    private BeginSignInRequest signUpRequest;
+
+    private GoogleSignInClient googleSignInClient;
+    private boolean valid = false; // Used it to mark the try with google client
+    private final ActivityResultLauncher<Intent> activityResultLauncher = getGodot().registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), new ActivityResultCallback<ActivityResult>() {
+        @Override
+        public void onActivityResult(ActivityResult result) {
+            if (result.getResultCode() == RESULT_OK && valid){
+                Task<GoogleSignInAccount> accountTask = GoogleSignIn.getSignedInAccountFromIntent(result.getData());
+                try{
+                    GoogleSignInAccount signInAccount = accountTask.getResult(ApiException.class);
+                    handleGoogleAccessToken(signInAccount.getIdToken());
+                } catch (ApiException e) {
+                    firebaseCrashlytics.recordException(e);
+                    sendEvent("GOOGLE", "Google login api exception");
+                    emitSignal("on_server_update", "Google Auth error", true);
+                }
+            }
+        }
+    });
+
     // For Firebase
     private FirebaseAuth firebaseAuth;
     private FirebaseUser firebaseUser;
@@ -75,9 +91,11 @@ public class Helper extends GodotPlugin {
     private FirebaseDatabase firebaseDatabase;
     private FirebaseCrashlytics firebaseCrashlytics;
 
+    private boolean isNewUser = false;
+
     public Helper(Godot godot) {
         super(godot);
-        this.activity = getActivity();
+        this.godot = godot;
     }
 
     @NonNull
@@ -86,13 +104,33 @@ public class Helper extends GodotPlugin {
         return "Helper";
     }
 
+
+    @NonNull
+    @Override
+    public List<String> getPluginMethods() {
+        return Arrays.asList(
+                "init",
+                "loginWithAnonym",
+                "loginWithGoogle",
+                "getScore",
+                "setScore",
+                "logout",
+                "saveToRTDB",
+                "getFromRTDB",
+                "boardData",
+                "share",
+                "sendEvent",
+                "isLoggedIn"
+        );
+    }
+
     @NonNull
     @Override
     public Set<SignalInfo> getPluginSignals() {
         Set<SignalInfo> signalInfo = new ArraySet<>();
         // Firebase
         signalInfo.add(new SignalInfo("on_server_update", String.class, Boolean.class)); // boolean is_error occurs
-        signalInfo.add(new SignalInfo("on_completed"));
+        signalInfo.add(new SignalInfo("on_completed", String.class, Boolean.class));
         signalInfo.add(new SignalInfo("on_get_rtdb", Dictionary.class));
 
         // Leaderboard
@@ -132,77 +170,40 @@ public class Helper extends GodotPlugin {
             Log.d(TAG, "FIREBASE: got host:" + Host);
         }
         // For Login
-        activity.runOnUiThread(() -> {
+        godot.runOnUiThread(() -> {
             try {
-                // Getting the instances
-                callbackManager = CallbackManager.Factory.create();
-                onTapClient = Identity.getSignInClient(activity.getApplicationContext());
-                signUpRequest = BeginSignInRequest.builder()
-                        .setGoogleIdTokenRequestOptions(BeginSignInRequest.GoogleIdTokenRequestOptions.builder()
-                                .setSupported(true)
-                                .setServerClientId("1017278365273-qs4v9kr64not3aot1242ekajic088hv0.apps.googleusercontent.com")
-                                .setFilterByAuthorizedAccounts(false)
-                                .build())
-                        .build();
                 // Configuring if not login or first time opened app
                 if (isFirstTime || !isLoggedIn()) {
-                    // Fb login Manager
-                    FacebookSdk.setApplicationId("352763776016419");
-                    LoginManager.getInstance().registerCallback(callbackManager, new FacebookCallback<>() {
-                        @Override
-                        public void onSuccess(LoginResult loginResult) {
-                            handleFacebookAccessToken(loginResult.getAccessToken());
-                            emitSignal("on_server_update", "Authenticated from Facebook...", false);
-                        }
 
-                        @Override
-                        public void onCancel() {
-                            sendEvent("FB", "Fb login cancelled by the user");
-                            emitSignal("on_server_update", "Cancelled Facebook Auth", true);
-                        }
-
-                        @Override
-                        public void onError(@NonNull FacebookException e) {
-                            sendEvent("FB", String.valueOf(e));
-                            sendCrashes("Fb login", String.valueOf(e), "Fb error");
-                            emitSignal("on_server_update", "Facebook error", true);
-                        }
-                    });
-                    Log.d(TAG, "Init completed");
+                    // Hashing to prevent replay Attack
+                    String rawNonce = UUID.randomUUID().toString();
+                    byte[] bytes = rawNonce.getBytes();
+                    MessageDigest md = MessageDigest.getInstance("SHA-256");
+                    byte[] digest = md.digest(bytes);
+                    String hashedNonce = Arrays.toString(digest);
+                    GoogleSignInOptions googleSignInOptions = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestIdToken("1017278365273-qs4v9kr64not3aot1242ekajic088hv0.apps.googleusercontent.com")
+                            .requestEmail()
+                            .build();
+                    googleSignInClient = GoogleSignIn.getClient(godot.requireActivity(), googleSignInOptions);
                 }
-            } catch (FacebookSdkNotInitializedException e) {
-                sendCrashes("Fb SDK", String.valueOf(e), "Fb error");
             } catch (Exception e) {
                 firebaseCrashlytics.recordException(e);
             }
         });
     }
 
-    private void handleFacebookAccessToken(@NonNull AccessToken accessToken) {
-        AuthCredential credential = FacebookAuthProvider.getCredential(accessToken.getToken());
-        firebaseAuth.signInWithCredential(credential)
-                .addOnCompleteListener(activity, task -> {
-                    if (!task.isSuccessful()) {
-                        emitSignal("on_server_update", "Server Error please try again...", true);
-                    } else {
-                        firebaseUser = firebaseAuth.getCurrentUser();
-                        cfgServerDB(Objects.requireNonNull(firebaseUser).getDisplayName(),
-                                Objects.requireNonNull(firebaseUser.getPhotoUrl()).getPath(),
-                                token);
-                    }
-                });
-    }
-
     private void handleGoogleAccessToken(String idToken) {
         AuthCredential credential = GoogleAuthProvider.getCredential(idToken, null);
         firebaseAuth.signInWithCredential(credential)
-                .addOnCompleteListener((Executor) this, task -> {
+                .addOnCompleteListener(godot.requireActivity(), task -> {
                     if (!task.isSuccessful()) {
                         emitSignal("on_server_update", "Server Error please try again...", true);
                     } else {
+                        isNewUser = Objects.requireNonNull(task.getResult().getAdditionalUserInfo()).isNewUser();
                         firebaseUser = firebaseAuth.getCurrentUser();
                         cfgServerDB(Objects.requireNonNull(firebaseUser).getDisplayName(),
-                                Objects.requireNonNull(firebaseUser.getPhotoUrl()).getPath(),
+                                "google/" + Objects.requireNonNull(firebaseUser.getPhotoUrl()).getPath(),
                                 token);
                     }
                 });
@@ -215,9 +216,10 @@ public class Helper extends GodotPlugin {
             if (!task.isSuccessful()) {
                 emitSignal("on_server_update", "Server Error please try again...", true);
             } else {
+                isNewUser = Objects.requireNonNull(task.getResult().getAdditionalUserInfo()).isNewUser();
                 firebaseUser = firebaseAuth.getCurrentUser();
                 cfgServerDB(randomIdentifier(),
-                        "https://firebasestorage.googleapis.com/v0/b/flappy-toons.appspot.com/o/icon.png?alt=media&token=76a10d02-db85-41e6-9f06-76ea28b304a0",
+                        "",
                         token);
             }
         });
@@ -225,27 +227,10 @@ public class Helper extends GodotPlugin {
 
     @UsedByGodot
     public void loginWithGoogle(){
-        onTapClient.beginSignIn(signUpRequest)
-                .addOnSuccessListener(activity, beginSignInResult -> {
-                    try {
-                        startIntentSenderForResult(
-                                activity,
-                                beginSignInResult.getPendingIntent().getIntentSender(),
-                                REQ_ONE_TAP,
-                                null,
-                                0,
-                                0,
-                                0,
-                                null);
-                    } catch (IntentSender.SendIntentException e) {
-                        sendEvent("One Tap Google", e.toString());
-                        emitSignal("on_server_update", "Google login failed", true);
-                    }
-                })
-                .addOnFailureListener(activity, e -> {
-                    sendEvent("One Tap Google", e.toString());
-                    emitSignal("on_server_update", "Google login error", true);
-                });
+        valid = true;
+        Intent intent = googleSignInClient.getSignInIntent();
+        activityResultLauncher.launch(intent);
+        emitSignal("on_server_update", "Sending request to google", false);
     }
 
     private void cfgServerDB(String name, String photoURL, String msgToken){
@@ -253,10 +238,16 @@ public class Helper extends GodotPlugin {
         Map<String, Object> player = new HashMap<>();
         player.put("name", name);
         player.put("photo", photoURL);
-        player.put("score", 0);
-        firestore.collection("players")
-                .document(firebaseUser.getUid())
-                .set(player);
+        if (isNewUser) {
+            player.put("score", 0);
+            firestore.collection("players")
+                    .document(firebaseUser.getUid())
+                    .set(player);
+        }else{
+            firestore.collection("players")
+                    .document(firebaseUser.getUid())
+                    .update(player);
+        }
 
         // For identity and msg token
         Map<String, String> map = new HashMap<>();
@@ -264,7 +255,7 @@ public class Helper extends GodotPlugin {
         firestore.collection("msgToken")
                 .document(firebaseUser.getUid())
                 .set(map);
-        emitSignal("on_completed");
+        emitSignal("on_completed", name, isNewUser);
     }
 
 
@@ -312,23 +303,25 @@ public class Helper extends GodotPlugin {
      * **/
     @UsedByGodot
     public void getFromRTDB(String key){
-        Dictionary db = new Dictionary();
-        firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                for (DataSnapshot snap:
-                        snapshot.getChildren()) {
-                    db.put(snap.getKey(), snap.getValue(String.class));
+        if (isLoggedIn() && !firebaseUser.isAnonymous()) {
+            Dictionary db = new Dictionary();
+            firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).addValueEventListener(new ValueEventListener() {
+                @Override
+                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                    for (DataSnapshot snap :
+                            snapshot.getChildren()) {
+                            db.put(snap.getKey(), snap.getValue());
+                    }
+                    emitSignal("on_get_rtdb", db);
                 }
-            }
 
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                sendCrashes(error.getMessage(), error.getDetails(), String.valueOf(error.getCode()));
-                sendEvent("Error getting " + key, error.toString());
-            }
-        });
-        emitSignal("on_get_rtdb", db);
+                @Override
+                public void onCancelled(@NonNull DatabaseError error) {
+                    sendCrashes(error.getMessage(), error.getDetails(), String.valueOf(error.getCode()));
+                    sendEvent("Error getting " + key, error.toString());
+                }
+            });
+        }
     }
 
     /**
@@ -338,7 +331,7 @@ public class Helper extends GodotPlugin {
      */
     @UsedByGodot
     public void saveToRTDB(String key, Dictionary db){
-        if (firebaseAuth != null) {
+        if (isLoggedIn() && !firebaseUser.isAnonymous()) {
             firebaseDatabase.getReference().child(firebaseUser.getUid()).child(key).setValue(db);
         }
     }
@@ -360,6 +353,10 @@ public class Helper extends GodotPlugin {
                     // Get the fields of the document
                     String name = document.getString("name");
                     String photo = document.getString("photo");
+                    assert photo != null;
+                    if (photo.contains("google/")){
+                        photo = photo.replace("google/", "https://lh3.googleusercontent.com");
+                    }
                     int score = Objects.requireNonNull(document.getLong("score")).intValue();
                     Dictionary pl = new Dictionary();
                     pl.put("name", name);
@@ -378,25 +375,15 @@ public class Helper extends GodotPlugin {
 }
 
     @UsedByGodot
-    public void share(int score){
-        activity.runOnUiThread(() -> {
+    public void share(String msg){
+        godot.runOnUiThread(() -> {
             Intent sendIntent = new Intent();
             sendIntent.setAction(Intent.ACTION_SEND);
-            String shareBody = "Check out this game: Flappy Toons" + ". My score is: " + score + ". You can download it from: https://play.google.com/store/apps/details?id=com.runn.flappytoons";
-            sendIntent.putExtra(Intent.EXTRA_TEXT, shareBody);
+            sendIntent.putExtra(Intent.EXTRA_TEXT, msg);
             sendIntent.setType("text/plain");
             Intent shareIntent = Intent.createChooser(sendIntent, null);
-            startActivity(activity, shareIntent, null);
+            startActivity(godot.requireActivity(), shareIntent, null);
         });
-    }
-
-    @UsedByGodot
-    public void loginWithFB(){
-        List<String> perm = new ArrayList<>();
-        perm.add("user_friends");
-        perm.add("email");
-        perm.add("public_profile");
-        LoginManager.getInstance().logInWithReadPermissions(activity, perm);
     }
 
     @UsedByGodot
@@ -406,7 +393,7 @@ public class Helper extends GodotPlugin {
 
     @UsedByGodot
     public void sendEvent(String key, String msg) {
-        FirebaseAnalytics analytics = FirebaseAnalytics.getInstance(activity.getApplicationContext());
+        FirebaseAnalytics analytics = FirebaseAnalytics.getInstance(godot.requireContext());
         Bundle bundle = new Bundle();
         bundle.putString(key, msg);
         if(isLoggedIn()) {
@@ -425,24 +412,12 @@ public class Helper extends GodotPlugin {
     }
 
     /**
-     * passing the activity result to callbackManager of the FB
      * @param requestCode the requested code for identity
      * @param resultCode the result code of request from intent
      * @param data the data of the result
      */
     @Override
     public void onMainActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == REQ_ONE_TAP){
-            try {
-                SignInCredential credential = onTapClient.getSignInCredentialFromIntent(data);
-                String idToken = credential.getGoogleIdToken();
-                handleGoogleAccessToken(idToken);
-            } catch (ApiException e){
-                sendEvent("One Tap Google", e.toString());
-                emitSignal("on_server_update", "Google login failed", true);
-            }
-        }
-        callbackManager.onActivityResult(requestCode, resultCode, data);
         super.onMainActivityResult(requestCode, resultCode, data);
     }
 }

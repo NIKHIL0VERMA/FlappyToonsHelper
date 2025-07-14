@@ -20,11 +20,10 @@ import org.godotengine.godot.Godot;
 /**
  * Created by Nikhil Verma.
  * RUNN is owner of the com.runn.flappytoons under Project Flappy Toons.
- * Founder of RUNN is Nikhil Verma
  * Copyright (c) 2020 RUNN.
  * Don't use the project or it's code without any legal permission.
  * For getting permission to use any part of code.
- * You may contact us on nikhil2003verma@gmail.com
+ * You may contact on nikhil2003verma@gmail.com
  **/
 
 public class CustomNotificationManager {
@@ -77,7 +76,7 @@ public class CustomNotificationManager {
         NotificationCompat.Builder status = new NotificationCompat.Builder(mCtx,"com.runn.flappytoons.notification");
         status.setAutoCancel(true)
                 .setWhen(System.currentTimeMillis())
-//                .setSmallIcon(R.drawable.not_ico) // TODO: add icon find how before production
+                .setSmallIcon(R.drawable.ico)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setColor(Color.RED)
